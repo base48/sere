@@ -5,6 +5,7 @@ import(
 	"net/http"
 	"encoding/json"
 	"time"
+	"math"
 
 	"github.com/julienschmidt/httprouter"
 	bh1750 "github.com/d2r2/go-bh1750"
@@ -12,12 +13,18 @@ import(
 	i2c "github.com/d2r2/go-i2c"
 )
 
+const(
+	ip		= "0.0.0.0"
+	port	= 10000
+	alt		= 225		// Altitude for pressure correction 
+)
+
 type(
 	Data struct{
-		Ligh string `json:"illuminance"`
-		Temp string `json:"temperature"`
-		Pres string `json:"pressure"`
-		Humi string `json:"humidity"`
+		Ligh uint16 `json:"illuminance"`
+		Temp float32 `json:"temperature"`
+		Pres float32 `json:"pressure"`
+		Humi float32 `json:"humidity"`
 	}
 )
 
@@ -31,14 +38,10 @@ func GetSen(){
 	sensoro, _ := bsbmp.NewBMP(bsbmp.BME280, i2co)
 
 	for{
-		a, _ := sensorl.MeasureAmbientLight(i2cl, bh1750.HighestResolution)
-		datag.Ligh = fmt.Sprintf("%v", a)
-		t, _ := sensoro.ReadTemperatureC(bsbmp.ACCURACY_STANDARD)
-		datag.Temp = fmt.Sprintf("%v", t)
-		p, _ := sensoro.ReadPressurePa(bsbmp.ACCURACY_STANDARD)
-		datag.Pres = fmt.Sprintf("%v", p)
-		_, h, _ := sensoro.ReadHumidityRH(bsbmp.ACCURACY_STANDARD)
-		datag.Humi = fmt.Sprintf("%v", h)
+		datag.Ligh, _ = sensorl.MeasureAmbientLight(i2cl, bh1750.HighestResolution)
+		datag.Temp, _ = sensoro.ReadTemperatureC(bsbmp.ACCURACY_STANDARD)
+		datag.Pres, _ = sensoro.ReadPressurePa(bsbmp.ACCURACY_STANDARD)
+		_, datag.Humi, _ = sensoro.ReadHumidityRH(bsbmp.ACCURACY_STANDARD)
 		time.Sleep(1000 * time.Millisecond)
 	}
 }
@@ -51,7 +54,7 @@ func main(){
 		data := Data{
 			Ligh:	datag.Ligh,
 			Temp:	datag.Temp,
-			Pres:	datag.Pres,
+			Pres:	float32(float64(datag.Pres)/math.Pow(1-alt/44330.0, 5.255)),
 			Humi:	datag.Humi,
 		}
 		dataj, _ := json.Marshal(data)
@@ -61,6 +64,6 @@ func main(){
 		fmt.Fprintf(w, "%s", dataj)
 	})
 
-	go GetSen()								// sensors thread
-	http.ListenAndServe("0.0.0.0:10000", r)	// server thread
+	go GetSen()	// sensors thread
+	http.ListenAndServe(fmt.Sprintf("%s:%d", ip, port), r)	// server thread
 }
