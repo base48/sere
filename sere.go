@@ -6,6 +6,7 @@ import(
 	"encoding/json"
 	"time"
 	"math"
+	"log/syslog"
 
 	"github.com/julienschmidt/httprouter"
 	bh1750 "github.com/d2r2/go-bh1750"
@@ -17,6 +18,7 @@ const(
 	ip		= "0.0.0.0"
 	port	= 10000
 	alt		= 225		// Altitude for pressure correction 
+	li		= 5			// log interval in minutes
 )
 
 type(
@@ -28,6 +30,8 @@ type(
 	}
 )
 
+var log *syslog.Writer
+
 func GetSen(){
 	i2cl, _ := i2c.NewI2C(0x23, 1) // light sen
 	i2co, _ := i2c.NewI2C(0x76, 1) // temp, pres, humi sen
@@ -36,12 +40,23 @@ func GetSen(){
 	sensorl := bh1750.NewBH1750()
 	sensorl.ChangeSensivityFactor(i2cl, 255)
 	sensoro, _ := bsbmp.NewBMP(bsbmp.BME280, i2co)
+	lt := time.Now()
 
 	for{
 		datag.Ligh, _ = sensorl.MeasureAmbientLight(i2cl, bh1750.HighestResolution)
 		datag.Temp, _ = sensoro.ReadTemperatureC(bsbmp.ACCURACY_STANDARD)
 		datag.Pres, _ = sensoro.ReadPressurePa(bsbmp.ACCURACY_STANDARD)
 		_, datag.Humi, _ = sensoro.ReadHumidityRH(bsbmp.ACCURACY_STANDARD)
+
+		t := time.Now()
+		if t.After(lt.Add(li * time.Minute)){
+			log.Info(
+			fmt.Sprintf("illuminance: %d; temperature: %.1f; pressure: %.1f; humidity: %.1f;",
+			datag.Ligh, datag.Temp, float32(float64(datag.Pres)/math.Pow(1-alt/44330.0, 5.255)),
+			datag.Humi))
+			lt = t
+		}
+
 		time.Sleep(1000 * time.Millisecond)
 	}
 }
@@ -50,7 +65,8 @@ var datag Data
 
 func main(){
 	r := httprouter.New()
-	r.GET("/data", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	log, _ = syslog.New(syslog.LOG_INFO|syslog.LOG_ERR, "sere")
+	r.GET("/", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		data := Data{
 			Ligh:	datag.Ligh,
 			Temp:	datag.Temp,
